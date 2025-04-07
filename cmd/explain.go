@@ -143,6 +143,29 @@ var explainCmd = &cobra.Command{
 			tableInfos = append(tableInfos, info)
 		}
 
+		fmt.Println("\n表结构信息:")
+		for _, info := range tableInfos {
+			fmt.Printf("\n表名: %s\n", info.TableName)
+
+			// 打印列信息
+			fmt.Println("列信息:")
+			for _, col := range info.Columns {
+				fmt.Printf("  - 列名: %-15s 类型: %-20s 是否为空: %-5s 键: %-5s 默认值: %-10s 额外信息: %s\n",
+					col.Field, col.Type, col.Null, col.Key, col.Default.String, col.Extra)
+			}
+
+			// 打印索引信息
+			fmt.Println("\n索引信息:")
+			for _, idx := range info.Indexes {
+				fmt.Printf("  - 索引名: %-15s 列名: %-15s 是否唯一: %d\n",
+					idx.IndexName, idx.ColumnName, idx.NonUnique)
+			}
+
+			// 打印建表语句
+			fmt.Println("\n建表语句:")
+			fmt.Println(info.CreateTable)
+		}
+
 		// 执行EXPLAIN
 		explainResults, err := executeExplain(db, sql)
 		if err != nil {
@@ -150,22 +173,28 @@ var explainCmd = &cobra.Command{
 			return
 		}
 
-		// 准备AI请求
-		request := AnalysisRequest{
-			SQLQuery:    sql,
-			TableInfos:  tableInfos,
-			ExplainPlan: explainResults,
+		// 打印EXPLAIN结果
+		fmt.Println("\nEXPLAIN结果:")
+		for _, result := range explainResults {
+			fmt.Printf("ID: %d, SelectType: %s, Table: %s, Type: %s, PossibleKeys: %s, Key: %s, KeyLen: %s, Ref: %s, Rows: %d, Filtered: %.2f, Extra: %s\n",
+				result.ID, result.SelectType, result.Table, result.Type, result.PossibleKeys, result.Key, result.KeyLen, result.Ref, result.Rows, result.Filtered, result.Extra)
 		}
+
+		// 准备AI请求
+		// request := AnalysisRequest{
+		// 	SQLQuery:    sql,
+		// 	TableInfos:  tableInfos,
+		// 	ExplainPlan: explainResults,
+		// }
 
 		// 发送给AI分析
-		analysis, err := sendToAI(config.OpenAIAPIKey, request)
-		if err != nil {
-			fmt.Printf("AI分析失败: %v\n", err)
-			return
-		}
+		// _, err = sendToAI(config.OpenAIAPIKey, request)
+		// if err != nil {
+		// 	fmt.Printf("AI分析失败: %v\n", err)
+		// 	return
+		// }
 
-		fmt.Println("\nAI分析结果:")
-		fmt.Println(analysis)
+		// fmt.Println("\nAI分析结果:")
 	},
 }
 
@@ -217,34 +246,39 @@ func getTableInfo(db *sql.DB, tableName string) (TableInfo, error) {
 		info.Columns = append(info.Columns, col)
 	}
 
-	// 获取索引信息
+	// 获取索引信息 - 重构部分
 	indexRows, err := db.Query(fmt.Sprintf("SHOW INDEX FROM `%s`", tableName))
 	if err != nil {
 		return info, err
 	}
 	defer indexRows.Close()
 
+	// 获取列信息
+	columns, err := indexRows.Columns()
+	if err != nil {
+		return info, err
+	}
+	columnCount := len(columns)
+
 	for indexRows.Next() {
 		var idx IndexInfo
-		var dummy1, dummy2, dummy3, dummy4, dummy5, dummy6, dummy7, dummy8, dummy9, dummy10, dummy11, dummy12, dummy13 interface{}
-		err := indexRows.Scan(
-			&dummy1, // Table
-			&idx.NonUnique,
-			&idx.IndexName,
-			&dummy2, // Seq_in_index
-			&idx.ColumnName,
-			&dummy3,  // Collation
-			&dummy4,  // Cardinality
-			&dummy5,  // Sub_part
-			&dummy6,  // Packed
-			&dummy7,  // Null
-			&dummy8,  // Index_type
-			&dummy9,  // Comment
-			&dummy10, // Index_comment
-			&dummy11, // Visible
-			&dummy12, // Expression
-			&dummy13, // Clustered
-		)
+		// 创建动态扫描目标
+		scanArgs := make([]interface{}, columnCount)
+
+		// 设置我们关心的字段位置
+		scanArgs[1] = &idx.NonUnique  // Non_unique
+		scanArgs[2] = &idx.IndexName  // Key_name
+		scanArgs[4] = &idx.ColumnName // Column_name
+
+		// 为其他列创建占位变量
+		for i := range scanArgs {
+			if scanArgs[i] == nil {
+				var dummy interface{}
+				scanArgs[i] = &dummy
+			}
+		}
+
+		err := indexRows.Scan(scanArgs...)
 		if err != nil {
 			return info, err
 		}
@@ -348,11 +382,13 @@ func sendToAI(apiKey string, request AnalysisRequest) (string, error) {
 	}
 	defer stream.Close()
 
+	fmt.Println("\nAI分析结果:") // 先打印标题
 	var fullResponse strings.Builder
 
 	for {
 		response, err := stream.Recv()
 		if errors.Is(err, io.EOF) {
+			fmt.Println() // 换行
 			return fullResponse.String(), nil
 		}
 
@@ -361,6 +397,7 @@ func sendToAI(apiKey string, request AnalysisRequest) (string, error) {
 		}
 
 		content := response.Choices[0].Delta.Content
+		fmt.Print(content) // 实时打印每个片段
 		fullResponse.WriteString(content)
 	}
 }
