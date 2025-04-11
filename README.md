@@ -33,10 +33,17 @@ go run main.go env
 ## 使用说明
 
 1. 配置 `.env` 文件中的 MySQL 和 OpenAI 参数
+
+```bash
+aiExplain env
+```
+
+然后修改 `.env` 文件以配置 MySQL 和 OpenAI 连接信息。
+
 2. 运行分析命令:
 
 ```bash
-go run main.go explain --query "YOUR_SQL_QUERY"
+aiExplain explain --query "YOUR_SQL_QUERY"
 ```
 
 ## 配置选项
@@ -56,7 +63,7 @@ go run main.go explain --query "YOUR_SQL_QUERY"
 
 项目结构:
 
-```
+```bash
 .
 ├── assets/       # 静态资源
 ├── cmd/          # 命令行代码
